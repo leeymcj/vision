@@ -32,6 +32,7 @@
 #include <string>
 #include <queue>
 #include <memory>
+#include <ctime>
 
 
 #include <stdio.h>
@@ -45,9 +46,6 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/resource.h>
-
-#include "lfq.h"
-
 
 #define CPU 4
 #define MYMUTEX "/mymutex"
@@ -73,6 +71,12 @@ int video_stabilizer(int argc, char* argv[]);
 //
 // main - Application entry point
 //
+void delay(int sec)
+{
+	for (long long int i=0; i<sec*50000000; i++)
+	asm("NOP");
+}
+
 
 void swap(int *xp, int *yp)
 {
@@ -130,7 +134,7 @@ int main(int argc, char* argv[])
     int *queue;
 	
 
-    pthread_mutex_t *mutex;
+    pthread_mutex_t *gpu_lock;
     
     int queue_id, mutex_id;
     int mode = S_IRWXU | S_IRWXG;
@@ -144,8 +148,8 @@ int main(int argc, char* argv[])
         perror("ftruncate failed with " MYMUTEX);
         return -1;
     }
-    mutex = (pthread_mutex_t *)mmap(NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, mutex_id, 0);
-    if (mutex == MAP_FAILED) {
+    gpu_lock = (pthread_mutex_t *)mmap(NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, mutex_id, 0);
+    if (gpu_lock == MAP_FAILED) {
         perror("mmap failed with " MYMUTEX);
         return -1;
     }
@@ -167,20 +171,20 @@ int main(int argc, char* argv[])
     /* set mutex shared between processes */
     pthread_mutexattr_t mattr;
     pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
-    pthread_mutex_init(mutex, &mattr);
+    pthread_mutex_init(gpu_lock, &mattr);
     pthread_mutexattr_destroy(&mattr);
 
 	int C[N];
 	int G[N];
 	int T[N];
-    struct timeval t1, t2;
-    double elapsedTime;
+	struct timespec ts_start, ts_end;
+    	double elapsedTime;
     //initialize
      for (i = 0; i < N; i++){
 	queue[i] = 0;
 	C[i] = (N-i);
-	G[i] = (N-i);
-	T[i] = (C[i] + G[i])*5;
+	G[i] = 5;
+	T[i] = (C[i] + G[i])*3;
      }
 
 
@@ -195,7 +199,7 @@ int main(int argc, char* argv[])
 		
 
         /*priority*/
-        ret = setpriority(PRIO_PROCESS, getpid(), -20);
+        ret = setpriority(PRIO_PROCESS, getpid(), -10-i);
 
  	/*partition*/
 	CPU_ZERO(&cpus);
@@ -206,37 +210,41 @@ int main(int argc, char* argv[])
 
 
 	while (1){
-	//release
-	gettimeofday(&t1, NULL);
+	clock_gettime(CLOCK_MONOTONIC, &ts_start);//release
 
 	/*CPU part*/
 	sleep(C[i]);
 
 
 
-
+	
 	/*GPU part*/
 	//printf("child process %d lock\n", getpid());
-	if( pthread_mutex_trylock(mutex) ){
+	while( pthread_mutex_trylock(gpu_lock) ){
 		printf("task%d put into wait\n", i);
 		enqueue(queue, getpid());
 		kill(getpid(), SIGSTOP);
-		continue;		
-	}
-	else{	
+	//MPCP priority celing
+	ret = setpriority(PRIO_PROCESS, getpid(), -20);
+	
+		continue;
+	}	
+
 	/*gpu execution*/
 	printf("task %d executes\n", i);
 	sleep(5); //FIXME GPU time
+
 	//GPU completion CPU resume
+		
 
-	}
-
-	gettimeofday(&t2, NULL);
-	elapsedTime = (t2.tv_sec - t1.tv_sec) * 1000.0;      // sec to ms
-        elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000.0;   // us to ms
+	
+	clock_gettime(CLOCK_MONOTONIC, &ts_end);
+	elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
+        elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
         printf("task %d completion time %lf\n", i, elapsedTime);
 
-	pthread_mutex_unlock(mutex);
+	ret = setpriority(PRIO_PROCESS, getpid(), -10-i); //return to base priority
+	pthread_mutex_unlock(gpu_lock);
 	kill( dequeue(queue) , SIGCONT);
 	sleep(T[i]-elapsedTime/1000 );
 
