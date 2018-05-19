@@ -113,6 +113,9 @@ int dequeue(int* q)
 	/* sort */
 	bubbleSort(q, N);	
 
+	/*GPU scheduling logic*/
+
+
 	int tmp =  q[0];
 	for (int i=0; q[i]>0; i++){		
 	q[i] = q[i+1];
@@ -232,13 +235,20 @@ int main(int argc, char* argv[])
 
 
 
+
+	/*main loop*/
 	while (1){
+
+	//FIXME /*release*/
+
+
+
 	clock_gettime(CLOCK_MONOTONIC, &ts_start);//release
 
 	/*CPU part*/
 	sleep(C[i][0]);
 
-
+	//FIXME /*CPU completion*/
 
 	
 	/*GPU part*/
@@ -268,9 +278,11 @@ int main(int argc, char* argv[])
 	kill( dequeue(queue) , SIGCONT);
 	//pthread_mutex_unlock(q_lock);
 	
+	//FIXME /*CPU resume*/
 
 	/*CPU part*/
 	sleep(C[i][1]);
+	//FIXME /*CPU completion*/
 
 	/*GPU part*/
 	//printf("child process %d lock\n", getpid());
@@ -304,13 +316,13 @@ int main(int argc, char* argv[])
         elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
         printf("task %d completion time %lf\n", i, elapsedTime);
 
+	//FIXME Job completion
+
 	
 	/*wait for next release*/
 	sleep(T[i]-elapsedTime/1000 );
 
-	
 
-	//exit(0);
 }	
 
 
