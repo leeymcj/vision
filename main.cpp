@@ -51,7 +51,9 @@
 #define MYMUTEX "/mymutex"
 #define MYQUEUE  "/mycond"
 
-#define N 4
+#define N 4 //number of tasks
+
+#define K 2 //maximum number of CPUs GPU sections
 
 
 /*#include <NVX/nvx.h>
@@ -185,19 +187,27 @@ int main(int argc, char* argv[])
     pthread_mutex_init(q_lock, &attr);
     pthread_mutexattr_destroy(&attr);
 
-	int C[N][2];
-	int G[N][2];
-	int T[N];
+	int C[N][K] = {0};
+	int G[N][K] = {0};
+	int T[N] = {0};
 	struct timespec ts_start, ts_end;
     	double elapsedTime;
     //initialize
      for (i = 0; i < N; i++){
 	queue[i] = 0;
-	C[i][0] = (N-i);
-	C[i][1] = (N-i);
-	G[i][0] = (N-i);
-	G[i][1] = (N-i);
-	T[i] = (C[i][0] + C[i][1] + G[i][0] + G[i][1])*3;
+
+	int C_SUM=0;
+	int G_SUM=0;
+
+	for (int k=0; k<K; k++)
+	{
+	C[i][k] = (N-i);
+	G[i][k] = (N-i);
+	C_SUM+= C[i][k];
+	G_SUM+= G[i][k];
+	}
+	
+	T[i] = (C_SUM + G_SUM)*3;
      }
 
 
