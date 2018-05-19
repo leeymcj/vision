@@ -44,6 +44,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/resource.h>
 
 #include "lfq.h"
 
@@ -73,6 +74,24 @@ int video_stabilizer(int argc, char* argv[]);
 // main - Application entry point
 //
 
+void swap(int *xp, int *yp)
+{
+    int temp = *xp;
+    *xp = *yp;
+    *yp = temp;
+}
+
+void bubbleSort(int arr[], int n)
+{
+   int i, j;
+   for (i = 0; i < n-1; i++)      
+ 
+       // Last i elements are already in place   
+       for (j = 0; j < n-i-1; j++) 
+           if (arr[j] < arr[j+1])
+              swap(&arr[j], &arr[j+1]);
+}
+
 void enqueue(int* q, int val)
 {
   for (int i=0; i<N; i++){
@@ -85,6 +104,9 @@ void enqueue(int* q, int val)
 
 int dequeue(int* q)
 {
+	/* sort */
+	bubbleSort(q, N);	
+
 	int tmp =  q[0];
 	for (int i=0; q[i]>0; i++){		
 	q[i] = q[i+1];
@@ -101,6 +123,7 @@ int main(int argc, char* argv[])
 	int pid[CPU];
 	cpu_set_t cpus;
 
+ 
 
     /*inter-process mutex*/
     //int *cond;
@@ -147,9 +170,18 @@ int main(int argc, char* argv[])
     pthread_mutex_init(mutex, &mattr);
     pthread_mutexattr_destroy(&mattr);
 
+	int C[N];
+	int G[N];
+	int T[N];
+    struct timeval t1, t2;
+    double elapsedTime;
     //initialize
-     for (i = 0; i < N; i++)
+     for (i = 0; i < N; i++){
 	queue[i] = 0;
+	C[i] = (N-i);
+	G[i] = (N-i);
+	T[i] = (C[i] + G[i])*5;
+     }
 
 
     /*lock-free queue*/
@@ -162,30 +194,51 @@ int main(int argc, char* argv[])
 		}
 		
 
+        /*priority*/
+        ret = setpriority(PRIO_PROCESS, getpid(), -20);
+
+ 	/*partition*/
 	CPU_ZERO(&cpus);
+	CPU_SET(0, &cpus);
+        sched_setaffinity(getpid(), sizeof(cpus), &cpus);
 	//CPU_SET(i, &cpus);
 
-	while (1){
 
+
+	while (1){
+	//release
+	gettimeofday(&t1, NULL);
+
+	/*CPU part*/
+	sleep(C[i]);
+
+
+
+
+	/*GPU part*/
 	//printf("child process %d lock\n", getpid());
 	if( pthread_mutex_trylock(mutex) ){
-		printf("child process %d put into wait\n", getpid());
+		printf("task%d put into wait\n", i);
 		enqueue(queue, getpid());
 		kill(getpid(), SIGSTOP);
-		printf("child process %d is waken up\n", getpid());
 		continue;		
 	}
 	else{	
 	/*gpu execution*/
-	printf("child process %d executes\n", getpid());
-	sleep(5);
+	printf("task %d executes\n", i);
+	sleep(5); //FIXME GPU time
+	//GPU completion CPU resume
+
 	}
 
-	int pid = dequeue(queue);
+	gettimeofday(&t2, NULL);
+	elapsedTime = (t2.tv_sec - t1.tv_sec) * 1000.0;      // sec to ms
+        elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000.0;   // us to ms
+        printf("task %d completion time %lf\n", i, elapsedTime);
+
 	pthread_mutex_unlock(mutex);
-	kill( pid, SIGCONT);
-	printf("wake child process %d\n", pid);
-	sleep(1);
+	kill( dequeue(queue) , SIGCONT);
+	sleep(T[i]-elapsedTime/1000 );
 
 	}
 	
@@ -222,9 +275,9 @@ int main(int argc, char* argv[])
 
 	while (1)
 	{
-	    for (int i=0; i<N; i++)
-		printf("%d\t", queue[i]);
-	    printf("\n");
+	//    for (int i=0; i<N; i++)
+	//	printf("%d\t", queue[i]);
+	//    printf("\n");
 	    sleep(1);
 
 	    
