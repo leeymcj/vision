@@ -183,7 +183,7 @@ int main(int argc, char* argv[])
      for (i = 0; i < N; i++){
 	queue[i] = 0;
 	C[i] = (N-i);
-	G[i] = 5;
+	G[i] = (N-i);
 	T[i] = (C[i] + G[i])*3;
      }
 
@@ -198,7 +198,7 @@ int main(int argc, char* argv[])
 		}
 		
 
-        /*priority*/
+        /*base priority*/
         ret = setpriority(PRIO_PROCESS, getpid(), -10-i);
 
  	/*partition*/
@@ -232,7 +232,7 @@ int main(int argc, char* argv[])
 
 	/*gpu execution*/
 	printf("task %d executes\n", i);
-	sleep(5); //FIXME GPU time
+	sleep(G[i]); //FIXME GPU time
 
 	//GPU completion CPU resume
 		
@@ -246,6 +246,8 @@ int main(int argc, char* argv[])
 	ret = setpriority(PRIO_PROCESS, getpid(), -10-i); //return to base priority
 	pthread_mutex_unlock(gpu_lock);
 	kill( dequeue(queue) , SIGCONT);
+	
+	/*wait for next release*/
 	sleep(T[i]-elapsedTime/1000 );
 
 	}
