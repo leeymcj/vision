@@ -135,6 +135,7 @@ int main(int argc, char* argv[])
 	
 
     pthread_mutex_t *gpu_lock;
+    pthread_mutex_t *q_lock;
     
     int queue_id, mutex_id;
     int mode = S_IRWXU | S_IRWXG;
@@ -163,6 +164,11 @@ int main(int argc, char* argv[])
         perror("ftruncate failed with " MYQUEUE);
         return -1;
     }
+    q_lock = (pthread_mutex_t *)mmap(NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, mutex_id, 0);
+    if (q_lock == MAP_FAILED) {
+        perror("mmap failed with " MYQUEUE);
+        return -1;
+	}
     queue = (int *)mmap(NULL, N*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, queue_id, 0);
     if (queue == MAP_FAILED) {
         perror("ftruncate failed with " MYQUEUE);
@@ -173,6 +179,11 @@ int main(int argc, char* argv[])
     pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
     pthread_mutex_init(gpu_lock, &mattr);
     pthread_mutexattr_destroy(&mattr);
+
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(q_lock, &attr);
+    pthread_mutexattr_destroy(&attr);
 
 	int C[N];
 	int G[N];
@@ -222,7 +233,11 @@ int main(int argc, char* argv[])
 	//printf("child process %d lock\n", getpid());
 	while( pthread_mutex_trylock(gpu_lock) ){
 		printf("task%d put into wait\n", i);
+
+		//pthread_mutex_lock(q_lock);
 		enqueue(queue, getpid());
+		//pthread_mutex_unlock(q_lock);
+
 		kill(getpid(), SIGSTOP);
 	//MPCP priority celing
 	ret = setpriority(PRIO_PROCESS, getpid(), -20);
@@ -245,16 +260,20 @@ int main(int argc, char* argv[])
 
 	ret = setpriority(PRIO_PROCESS, getpid(), -10-i); //return to base priority
 	pthread_mutex_unlock(gpu_lock);
+
+	//pthread_mutex_lock(q_lock);
 	kill( dequeue(queue) , SIGCONT);
+	//pthread_mutex_unlock(q_lock);
+
+
 	
 	/*wait for next release*/
 	sleep(T[i]-elapsedTime/1000 );
 
-	}
 	
 
 	//exit(0);
-	
+}	
 
 
 
