@@ -185,17 +185,19 @@ int main(int argc, char* argv[])
     pthread_mutex_init(q_lock, &attr);
     pthread_mutexattr_destroy(&attr);
 
-	int C[N];
-	int G[N];
+	int C[N][2];
+	int G[N][2];
 	int T[N];
 	struct timespec ts_start, ts_end;
     	double elapsedTime;
     //initialize
      for (i = 0; i < N; i++){
 	queue[i] = 0;
-	C[i] = (N-i);
-	G[i] = (N-i);
-	T[i] = (C[i] + G[i])*3;
+	C[i][0] = (N-i);
+	C[i][1] = (N-i);
+	G[i][0] = (N-i);
+	G[i][1] = (N-i);
+	T[i] = (C[i][0] + C[i][1] + G[i][0] + G[i][1])*3;
      }
 
 
@@ -224,7 +226,7 @@ int main(int argc, char* argv[])
 	clock_gettime(CLOCK_MONOTONIC, &ts_start);//release
 
 	/*CPU part*/
-	sleep(C[i]);
+	sleep(C[i][0]);
 
 
 
@@ -246,17 +248,8 @@ int main(int argc, char* argv[])
 	}	
 
 	/*gpu execution*/
-	printf("task %d executes\n", i);
-	sleep(G[i]); //FIXME GPU time
-
-	//GPU completion CPU resume
-		
-
-	
-	clock_gettime(CLOCK_MONOTONIC, &ts_end);
-	elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
-        elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
-        printf("task %d completion time %lf\n", i, elapsedTime);
+	printf("task %d executes on GPU\n", i);
+	sleep(G[i][0]); //e
 
 	ret = setpriority(PRIO_PROCESS, getpid(), -10-i); //return to base priority
 	pthread_mutex_unlock(gpu_lock);
@@ -264,7 +257,42 @@ int main(int argc, char* argv[])
 	//pthread_mutex_lock(q_lock);
 	kill( dequeue(queue) , SIGCONT);
 	//pthread_mutex_unlock(q_lock);
+	
 
+	/*CPU part*/
+	sleep(C[i][1]);
+
+	/*GPU part*/
+	//printf("child process %d lock\n", getpid());
+	while( pthread_mutex_trylock(gpu_lock) ){
+		printf("task%d put into wait\n", i);
+
+		//pthread_mutex_lock(q_lock);
+		enqueue(queue, getpid());
+		//pthread_mutex_unlock(q_lock);
+
+		kill(getpid(), SIGSTOP);
+	//MPCP priority celing
+	ret = setpriority(PRIO_PROCESS, getpid(), -20);
+	
+		continue;
+	}
+
+	/*gpu execution*/
+	printf("task %d executes on GPU\n", i);
+	sleep(G[i][1]); //e
+
+	ret = setpriority(PRIO_PROCESS, getpid(), -10-i); //return to base priority
+	pthread_mutex_unlock(gpu_lock);
+
+	//pthread_mutex_lock(q_lock);
+	kill( dequeue(queue) , SIGCONT);
+	//pthread_mutex_unlock(q_lock);
+	
+	clock_gettime(CLOCK_MONOTONIC, &ts_end);
+	elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
+        elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
+        printf("task %d completion time %lf\n", i, elapsedTime);
 
 	
 	/*wait for next release*/
