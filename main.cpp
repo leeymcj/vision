@@ -49,7 +49,8 @@
 
 #define CPU 4
 #define MYMUTEX "/mymutex"
-#define MYQUEUE  "/mycond"
+#define MYQLOCK "/myqlock"
+#define MYQUEUE  "/myqueue"
 
 #define N 4 //number of tasks
 
@@ -137,12 +138,13 @@ int main(int argc, char* argv[])
     /*inter-process mutex*/
     //int *cond;
     int *queue;
+    int *progress;
 	
 
     pthread_mutex_t *gpu_lock;
     pthread_mutex_t *q_lock;
     
-    int queue_id, mutex_id;
+    int queue_id, mutex_id, qlock_id;
     int mode = S_IRWXU | S_IRWXG;
     /* mutex */
     mutex_id = shm_open(MYMUTEX, O_CREAT | O_RDWR | O_TRUNC, mode);
@@ -159,7 +161,23 @@ int main(int argc, char* argv[])
         perror("mmap failed with " MYMUTEX);
         return -1;
     }
-    /* cond */
+
+    qlock_id = shm_open(MYMUTEX, O_CREAT | O_RDWR | O_TRUNC, mode);
+    if (mutex_id < 0) {
+        perror("shm_open failed with " MYQLOCK);
+        return -1;
+    }
+    if (ftruncate(mutex_id, sizeof(pthread_mutex_t)) == -1) {
+        perror("ftruncate failed with " MYQLOCK);
+        return -1;
+    }
+    q_lock = (pthread_mutex_t *)mmap(NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, mutex_id, 0);
+    if (q_lock == MAP_FAILED) {
+        perror("mmap failed with " MYQUEUE);
+        return -1;
+	}
+
+
     queue_id = shm_open(MYQUEUE, O_CREAT | O_RDWR | O_TRUNC, mode);
     if (queue_id < 0) {
         perror("shm_open failed with " MYQUEUE);
@@ -169,26 +187,20 @@ int main(int argc, char* argv[])
         perror("ftruncate failed with " MYQUEUE);
         return -1;
     }
-    q_lock = (pthread_mutex_t *)mmap(NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, mutex_id, 0);
-    if (q_lock == MAP_FAILED) {
-        perror("mmap failed with " MYQUEUE);
-        return -1;
-	}
+
     queue = (int *)mmap(NULL, N*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, queue_id, 0);
     if (queue == MAP_FAILED) {
         perror("ftruncate failed with " MYQUEUE);
         return -1;
     }
+
     /* set mutex shared between processes */
     pthread_mutexattr_t mattr;
     pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
     pthread_mutex_init(gpu_lock, &mattr);
-    pthread_mutexattr_destroy(&mattr);
 
-    pthread_mutexattr_t attr;
-    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
-    pthread_mutex_init(q_lock, &attr);
-    pthread_mutexattr_destroy(&attr);
+    pthread_mutex_init(q_lock, &mattr);
+    pthread_mutexattr_destroy(&mattr);
 
 	int C[N][K] = {0};
 	int G[N][K] = {0};
@@ -256,9 +268,9 @@ int main(int argc, char* argv[])
 	while( pthread_mutex_trylock(gpu_lock) ){
 		printf("task%d put into wait\n", i);
 
-		//pthread_mutex_lock(q_lock);
+		pthread_mutex_lock(q_lock);
 		enqueue(queue, getpid());
-		//pthread_mutex_unlock(q_lock);
+		pthread_mutex_unlock(q_lock);
 
 		kill(getpid(), SIGSTOP);
 	//MPCP priority celing
@@ -275,7 +287,10 @@ int main(int argc, char* argv[])
 	pthread_mutex_unlock(gpu_lock);
 
 	//pthread_mutex_lock(q_lock);
+	pthread_mutex_lock(q_lock);
 	kill( dequeue(queue) , SIGCONT);
+	pthread_mutex_unlock(q_lock);
+
 	//pthread_mutex_unlock(q_lock);
 	
 	//FIXME /*CPU resume*/
@@ -289,9 +304,9 @@ int main(int argc, char* argv[])
 	while( pthread_mutex_trylock(gpu_lock) ){
 		printf("task%d put into wait\n", i);
 
-		//pthread_mutex_lock(q_lock);
+		pthread_mutex_lock(q_lock);
 		enqueue(queue, getpid());
-		//pthread_mutex_unlock(q_lock);
+		pthread_mutex_unlock(q_lock);
 
 		kill(getpid(), SIGSTOP);
 	//MPCP priority celing
@@ -307,9 +322,9 @@ int main(int argc, char* argv[])
 	ret = setpriority(PRIO_PROCESS, getpid(), -10-i); //return to base priority
 	pthread_mutex_unlock(gpu_lock);
 
-	//pthread_mutex_lock(q_lock);
+	pthread_mutex_lock(q_lock);
 	kill( dequeue(queue) , SIGCONT);
-	//pthread_mutex_unlock(q_lock);
+	pthread_mutex_unlock(q_lock);
 	
 	clock_gettime(CLOCK_MONOTONIC, &ts_end);
 	elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
