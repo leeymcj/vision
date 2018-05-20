@@ -51,12 +51,17 @@
 #define MYMUTEX "/mymutex"
 #define MYQLOCK "/myqlock"
 #define MYQUEUE  "/myqueue"
+#define MYPROGRESS  "/myprogress"
 
 #define N 4 //number of tasks
 
 #define K 2 //maximum number of CPUs GPU sections
 
 
+int *queue;
+int *progress;
+pthread_mutex_t *gpu_lock;
+pthread_mutex_t *q_lock;
 /*#include <NVX/nvx.h>
 #include <NVX/nvx_timer.hpp>
 
@@ -74,6 +79,12 @@ int video_stabilizer(int argc, char* argv[]);
 //
 // main - Application entry point
 //
+
+
+
+
+
+
 void delay(int sec)
 {
 	for (long long int i=0; i<sec*50000000; i++)
@@ -126,6 +137,34 @@ int dequeue(int* q)
 }
 
 
+void gpuLock(int i){
+
+	while( pthread_mutex_trylock(gpu_lock) ){
+		printf("task%d put into wait\n", i);
+
+		pthread_mutex_lock(q_lock);
+		enqueue(queue, getpid());
+		pthread_mutex_unlock(q_lock);
+
+		kill(getpid(), SIGSTOP);
+		continue;
+	}
+
+	//MPCP priority celing
+	setpriority(PRIO_PROCESS, getpid(), -20);
+}
+
+void gpuUnlock(int i)
+{
+	setpriority(PRIO_PROCESS, getpid(), -10-i); //return to base priority
+	pthread_mutex_unlock(gpu_lock);
+
+	//pthread_mutex_lock(q_lock);
+	pthread_mutex_lock(q_lock);
+	kill( dequeue(queue) , SIGCONT);
+	pthread_mutex_unlock(q_lock);
+}
+
 int main(int argc, char* argv[])
 {
 
@@ -137,14 +176,8 @@ int main(int argc, char* argv[])
 
     /*inter-process mutex*/
     //int *cond;
-    int *queue;
-    int *progress;
-	
-
-    pthread_mutex_t *gpu_lock;
-    pthread_mutex_t *q_lock;
     
-    int queue_id, mutex_id, qlock_id;
+    int mutex_id, qlock_id, queue_id, progress_id;
     int mode = S_IRWXU | S_IRWXG;
     /* mutex */
     mutex_id = shm_open(MYMUTEX, O_CREAT | O_RDWR | O_TRUNC, mode);
@@ -162,20 +195,22 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    qlock_id = shm_open(MYMUTEX, O_CREAT | O_RDWR | O_TRUNC, mode);
-    if (mutex_id < 0) {
+
+    qlock_id = shm_open(MYQLOCK, O_CREAT | O_RDWR | O_TRUNC, mode);
+    if (qlock_id < 0) {
         perror("shm_open failed with " MYQLOCK);
         return -1;
     }
-    if (ftruncate(mutex_id, sizeof(pthread_mutex_t)) == -1) {
+    if (ftruncate(qlock_id, sizeof(pthread_mutex_t)) == -1) {
         perror("ftruncate failed with " MYQLOCK);
         return -1;
     }
-    q_lock = (pthread_mutex_t *)mmap(NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, mutex_id, 0);
+    q_lock = (pthread_mutex_t *)mmap(NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, qlock_id, 0);
     if (q_lock == MAP_FAILED) {
-        perror("mmap failed with " MYQUEUE);
+        perror("mmap failed with " MYQLOCK);
         return -1;
 	}
+
 
 
     queue_id = shm_open(MYQUEUE, O_CREAT | O_RDWR | O_TRUNC, mode);
@@ -187,10 +222,25 @@ int main(int argc, char* argv[])
         perror("ftruncate failed with " MYQUEUE);
         return -1;
     }
-
     queue = (int *)mmap(NULL, N*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, queue_id, 0);
     if (queue == MAP_FAILED) {
         perror("ftruncate failed with " MYQUEUE);
+        return -1;
+    }
+
+
+    progress_id = shm_open(MYPROGRESS, O_CREAT | O_RDWR | O_TRUNC, mode);
+    if (queue_id < 0) {
+        perror("shm_open failed with " MYPROGRESS);
+        return -1;
+    }
+    if (ftruncate(progress_id, sizeof(int)) == -1) {
+        perror("ftruncate failed with " MYPROGRESS);
+        return -1;
+    }
+     progress = (int *)mmap(NULL, N*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, progress_id, 0);
+    if (progress == MAP_FAILED) {
+        perror("ftruncate failed with " MYPROGRESS);
         return -1;
     }
 
@@ -265,33 +315,15 @@ int main(int argc, char* argv[])
 	
 	/*GPU part*/
 	//printf("child process %d lock\n", getpid());
-	while( pthread_mutex_trylock(gpu_lock) ){
-		printf("task%d put into wait\n", i);
+	gpuLock(i);
 
-		pthread_mutex_lock(q_lock);
-		enqueue(queue, getpid());
-		pthread_mutex_unlock(q_lock);
-
-		kill(getpid(), SIGSTOP);
-	//MPCP priority celing
-	ret = setpriority(PRIO_PROCESS, getpid(), -20);
-	
-		continue;
-	}	
 
 	/*gpu execution*/
 	printf("task %d executes on GPU\n", i);
 	sleep(G[i][0]); //e
 
-	ret = setpriority(PRIO_PROCESS, getpid(), -10-i); //return to base priority
-	pthread_mutex_unlock(gpu_lock);
+ 	gpuUnlock(i);
 
-	//pthread_mutex_lock(q_lock);
-	pthread_mutex_lock(q_lock);
-	kill( dequeue(queue) , SIGCONT);
-	pthread_mutex_unlock(q_lock);
-
-	//pthread_mutex_unlock(q_lock);
 	
 	//FIXME /*CPU resume*/
 
@@ -301,31 +333,16 @@ int main(int argc, char* argv[])
 
 	/*GPU part*/
 	//printf("child process %d lock\n", getpid());
-	while( pthread_mutex_trylock(gpu_lock) ){
-		printf("task%d put into wait\n", i);
-
-		pthread_mutex_lock(q_lock);
-		enqueue(queue, getpid());
-		pthread_mutex_unlock(q_lock);
-
-		kill(getpid(), SIGSTOP);
-	//MPCP priority celing
-	ret = setpriority(PRIO_PROCESS, getpid(), -20);
-	
-		continue;
-	}
+	gpuLock(i);
 
 	/*gpu execution*/
 	printf("task %d executes on GPU\n", i);
 	sleep(G[i][1]); //e
 
-	ret = setpriority(PRIO_PROCESS, getpid(), -10-i); //return to base priority
-	pthread_mutex_unlock(gpu_lock);
+	gpuUnlock(i);
 
-	pthread_mutex_lock(q_lock);
-	kill( dequeue(queue) , SIGCONT);
-	pthread_mutex_unlock(q_lock);
-	
+
+
 	clock_gettime(CLOCK_MONOTONIC, &ts_end);
 	elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
         elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
