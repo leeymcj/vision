@@ -74,6 +74,7 @@ int x[N];
 int *progress;
 int *onGPU;
 int HOT[N+1] = {0, 0, 1, 1, 0};
+int P[N] = { 0, 0, 0, 0};
 #endif
 
 
@@ -292,6 +293,7 @@ int main(int argc, char* argv[])
 	
 	T[i] = (C_SUM + G_SUM)*3;
      }
+     *onGPU = N;
 	
 	
 
@@ -311,7 +313,7 @@ int main(int argc, char* argv[])
 
  	/*partition*/
 	CPU_ZERO(&cpus);
-	CPU_SET(0, &cpus);
+	CPU_SET(P[i], &cpus);
         sched_setaffinity(getpid(), sizeof(cpus), &cpus);
 	//CPU_SET(i, &cpus);
 
@@ -337,6 +339,7 @@ int main(int argc, char* argv[])
 	//FIXME /*CPU completion*/
 	if (HOT[*onGPU]){
 		printf("GPU is running hot task %d\n", *onGPU);
+		
 		//next running task from the highest priority
 		//for (i=N; i>=0; i--){
 		//}
