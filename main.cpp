@@ -57,11 +57,26 @@
 
 #define K 2 //maximum number of CPUs GPU sections
 
+#define sched
 
 int *queue;
-int *progress;
+
 pthread_mutex_t *gpu_lock;
 pthread_mutex_t *q_lock;
+
+int C[N][K] = {0};
+int G[N][K] = {0};
+int T[N] = {0};
+	
+#ifdef sched
+int V[N] = {58, 56, 34, 30};
+int x[N];
+int *progress;
+int *onGPU;
+int HOT[N+1] = {0, 0, 1, 1, 0};
+#endif
+
+
 /*#include <NVX/nvx.h>
 #include <NVX/nvx_timer.hpp>
 
@@ -149,13 +164,15 @@ void gpuLock(int i){
 		kill(getpid(), SIGSTOP);
 		continue;
 	}
-
+	*onGPU = i;
+	printf("task %d executes on GPU\n", i);
 	//MPCP priority celing
 	setpriority(PRIO_PROCESS, getpid(), -20);
 }
 
 void gpuUnlock(int i)
 {
+	*onGPU = N;
 	setpriority(PRIO_PROCESS, getpid(), -10-i); //return to base priority
 	pthread_mutex_unlock(gpu_lock);
 
@@ -244,6 +261,10 @@ int main(int argc, char* argv[])
         return -1;
     }
 
+
+    onGPU = (int*) mmap(NULL, N*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+
+
     /* set mutex shared between processes */
     pthread_mutexattr_t mattr;
     pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
@@ -252,9 +273,6 @@ int main(int argc, char* argv[])
     pthread_mutex_init(q_lock, &mattr);
     pthread_mutexattr_destroy(&mattr);
 
-	int C[N][K] = {0};
-	int G[N][K] = {0};
-	int T[N] = {0};
 	struct timespec ts_start, ts_end;
     	double elapsedTime;
     //initialize
@@ -274,6 +292,8 @@ int main(int argc, char* argv[])
 	
 	T[i] = (C_SUM + G_SUM)*3;
      }
+	
+	
 
 
     /*lock-free queue*/
@@ -287,7 +307,7 @@ int main(int argc, char* argv[])
 		
 
         /*base priority*/
-        ret = setpriority(PRIO_PROCESS, getpid(), -10-i);
+        setpriority(PRIO_PROCESS, getpid(), -10-i);
 
  	/*partition*/
 	CPU_ZERO(&cpus);
@@ -301,7 +321,11 @@ int main(int argc, char* argv[])
 	/*main loop*/
 	while (1){
 
+
 	//FIXME /*release*/
+	 progress[i]=0;
+	 //printf("task %d is on GPU\n", *onGPU);
+	 
 
 
 
@@ -311,6 +335,20 @@ int main(int argc, char* argv[])
 	sleep(C[i][0]);
 
 	//FIXME /*CPU completion*/
+	if (HOT[*onGPU]){
+		printf("GPU is running hot task %d\n", *onGPU);
+		//next running task from the highest priority
+		//for (i=N; i>=0; i--){
+		//}
+	}	
+	else{
+		printf("GPU is running cold task %d\n", *onGPU);
+
+	}
+
+
+
+	progress[i]=1;
 
 	
 	/*GPU part*/
@@ -319,24 +357,24 @@ int main(int argc, char* argv[])
 
 
 	/*gpu execution*/
-	printf("task %d executes on GPU\n", i);
 	sleep(G[i][0]); //e
 
  	gpuUnlock(i);
 
 	
 	//FIXME /*CPU resume*/
+	 progress[i]=2;
 
 	/*CPU part*/
 	sleep(C[i][1]);
 	//FIXME /*CPU completion*/
+	 progress[i]==4;
 
 	/*GPU part*/
 	//printf("child process %d lock\n", getpid());
 	gpuLock(i);
 
 	/*gpu execution*/
-	printf("task %d executes on GPU\n", i);
 	sleep(G[i][1]); //e
 
 	gpuUnlock(i);
@@ -349,6 +387,7 @@ int main(int argc, char* argv[])
         printf("task %d completion time %lf\n", i, elapsedTime);
 
 	//FIXME Job completion
+	 progress[i]=5;
 
 	
 	/*wait for next release*/
