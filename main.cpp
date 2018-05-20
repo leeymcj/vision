@@ -66,12 +66,14 @@ int *queue;
 pthread_mutex_t *gpu_lock;
 pthread_mutex_t *q_lock;
 
+int base_pid;
 //int C[N][K] = {0};
 //int G[N][K] = {0};
 
 int E[N][K*2+1] = {0};
 
 int T[N] = {0};
+
 	
 #ifdef sched
 int V[N] = { 80, 37, 20, 20};
@@ -138,6 +140,8 @@ void bubbleSort(int arr[], int n)
               swap(&arr[j], &arr[j+1]);
 }
 
+
+
 void enqueue(int* q, int val)
 {
   for (int i=0; i<N; i++){
@@ -148,16 +152,53 @@ void enqueue(int* q, int val)
   }  
 }
 
+int onCPU(void){
+	int hotCPU=2;
+
+	for (int j=0; PPriority[hotCPU][j]>=0; j++)
+        {
+		int task = PPriority[P[hotCPU]][j];
+		 if ( progress[task] == 0 || progress[task] == 2 || progress[task] == 4 ){ //running CPU part
+		printf("task %d executes on hot CPU\n", task);
+			return task;
+		}
+	}
+	return N; //no task running
+}
+
+
 int dequeue(int* q)
 {
 	/* sort */
 	bubbleSort(q, N);	
+	int j=0; //take first task
 
+#ifdef sched
 	/*GPU scheduling logic*/
+	int CPUtask = onCPU();
+	if( HOT[CPUtask] ) //hot taks on CPU
+	{		
+		for (int j=0; q[j]>0; j++){
+			int i = q[j]-base_pid-1;
+			if (!HOT[i])
+				break;
+		}
+	}
+	else //cold task on CPU
+	{
+		for (int j=0; q[j]>0; j++){
+			int i = q[j]-base_pid-1;
+			if (HOT[i])
+				break;
+		}
 
+	}
+	
 
-	int tmp =  q[0];
-	for (int i=0; q[i]>0; i++){		
+#endif
+//take j-th task
+	int tmp =  q[j];
+	for (int i=j; q[i]>0; i++){		
 	q[i] = q[i+1];
 	}
 
@@ -219,7 +260,7 @@ void cpuSched(int i){
 				//priority inversion
 				if (  (HOT[*onGPU] && !HOT[task]) && ( x[highest] - E[task][ progress[task] ] >= 0)  )
 				{ //hot/cold schedule
-        				setpriority(PRIO_PROCESS, getpid() - i + task, -20);
+        				setpriority(PRIO_PROCESS,  base_pid+i+1, -20);
 					x[highest]-=  E[task][ progress[task] ];
 					printf("GPU is HOT, schedule COLD task %d instead of %d\n", task, highest);
 					break;
@@ -227,7 +268,7 @@ void cpuSched(int i){
 
 				if (  (!HOT[*onGPU] && HOT[task])  && (x[highest] - E[task][ progress[task] ] >= 0)   )
 				{
-        				setpriority(PRIO_PROCESS, getpid() - i + task, -20);
+        				setpriority(PRIO_PROCESS, base_pid+1, -20);
 					x[highest]-=  E[task][ progress[task] ];
 					printf("GPU is COLD, schedule HOT task %d insead of %d\n", task, highest);
 					break;
@@ -236,12 +277,7 @@ void cpuSched(int i){
 			}
 		
 	}	
-
-
-
 }
-
-
 
 int main(int argc, char* argv[])
 {
@@ -250,7 +286,7 @@ int main(int argc, char* argv[])
 	int pid[CPU];
 	cpu_set_t cpus;
 
- 
+    base_pid = getpid();
 
     /*inter-process mutex*/
     //int *cond;
