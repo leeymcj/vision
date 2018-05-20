@@ -57,6 +57,8 @@
 
 #define K 2 //maximum number of CPUs GPU sections
 
+#define U 0.3
+
 #define sched
 
 int *queue;
@@ -64,17 +66,27 @@ int *queue;
 pthread_mutex_t *gpu_lock;
 pthread_mutex_t *q_lock;
 
-int C[N][K] = {0};
-int G[N][K] = {0};
+//int C[N][K] = {0};
+//int G[N][K] = {0};
+
+int E[N][K*2+1] = {0};
+
 int T[N] = {0};
 	
 #ifdef sched
-int V[N] = {58, 56, 34, 30};
+int V[N] = { 80, 37, 20, 20};
 int x[N];
 int *progress;
 int *onGPU;
 int HOT[N+1] = {0, 0, 1, 1, 0};
 int P[N] = { 0, 0, 0, 0};
+int PPriority[CPU][N] = {
+			{3, 2, 1, 0}, //in the ordre of priority
+			{-1, -1, -1, -1},
+			{-1, -1, -1, -1},
+			{-1, -1, -1, -1}
+			};
+
 #endif
 
 
@@ -167,6 +179,7 @@ void gpuLock(int i){
 	}
 	*onGPU = i;
 	printf("task %d executes on GPU\n", i);
+
 	//MPCP priority celing
 	setpriority(PRIO_PROCESS, getpid(), -20);
 }
@@ -182,6 +195,53 @@ void gpuUnlock(int i)
 	kill( dequeue(queue) , SIGCONT);
 	pthread_mutex_unlock(q_lock);
 }
+
+void cpuSched(int i){
+
+	//next running task from the highest priority
+	int j, highest;
+	for (j=0, highest=-1; PPriority[P[i]][j]>=0; j++)
+	{
+			int task = PPriority[P[i]][j];
+			if ( progress[task] == 0 || progress[task] == 2 || progress[task] == 4 ) //running CPU part
+			{
+				//printf("task%d is running on CPU part on the same core with %d\n", PPriority[P[i]][j], i );	
+				//highest
+				if (highest<0){
+				highest=task;
+
+				if (  (HOT[*onGPU] && !HOT[highest]) || (!HOT[*onGPU] && HOT[highest]) )
+				break;
+				else
+				continue;
+				}
+	
+				//priority inversion
+				if (  (HOT[*onGPU] && !HOT[task]) && ( x[highest] - E[task][ progress[task] ] >= 0)  )
+				{ //hot/cold schedule
+        				setpriority(PRIO_PROCESS, getpid() - i + task, -20);
+					x[highest]-=  E[task][ progress[task] ];
+					printf("GPU is HOT, schedule COLD task %d instead of %d\n", task, highest);
+					break;
+				}
+
+				if (  (!HOT[*onGPU] && HOT[task])  && (x[highest] - E[task][ progress[task] ] >= 0)   )
+				{
+        				setpriority(PRIO_PROCESS, getpid() - i + task, -20);
+					x[highest]-=  E[task][ progress[task] ];
+					printf("GPU is COLD, schedule HOT task %d insead of %d\n", task, highest);
+					break;
+				}
+
+			}
+		
+	}	
+
+
+
+}
+
+
 
 int main(int argc, char* argv[])
 {
@@ -280,25 +340,22 @@ int main(int argc, char* argv[])
      for (i = 0; i < N; i++){
 	queue[i] = 0;
 
-	int C_SUM=0;
-	int G_SUM=0;
+	int E_SUM=0;
 
-	for (int k=0; k<K; k++)
+	for (int k=0; k< (2*K+1) ; k++)
 	{
-	C[i][k] = (N-i);
-	G[i][k] = (N-i);
-	C_SUM+= C[i][k];
-	G_SUM+= G[i][k];
+	E[i][k] = (N-i);
+	//G[i][k] = (N-i);
+	E_SUM+= E[i][k];
 	}
 	
-	T[i] = (C_SUM + G_SUM)*3;
+	T[i] = E_SUM / U ;
      }
      *onGPU = N;
 	
 	
 
 
-    /*lock-free queue*/
 	for (i = 0; i < N; i++) {
 		ret = fork();	
 		if (ret != 0) {
@@ -322,11 +379,14 @@ int main(int argc, char* argv[])
 
 	/*main loop*/
 	while (1){
-
+#ifdef sched
+	x[i] = V[i];
+#endif
 
 	//FIXME /*release*/
 	 progress[i]=0;
 	 //printf("task %d is on GPU\n", *onGPU);
+	cpuSched(i);
 	 
 
 
@@ -334,51 +394,41 @@ int main(int argc, char* argv[])
 	clock_gettime(CLOCK_MONOTONIC, &ts_start);//release
 
 	/*CPU part*/
-	sleep(C[i][0]);
+	sleep(E[i][ progress[i] ]);
 
 	//FIXME /*CPU completion*/
-	if (HOT[*onGPU]){
-		printf("GPU is running hot task %d\n", *onGPU);
-		
-		//next running task from the highest priority
-		//for (i=N; i>=0; i--){
-		//}
-	}	
-	else{
-		printf("GPU is running cold task %d\n", *onGPU);
-
-	}
-
-
-
 	progress[i]=1;
-
+        setpriority(PRIO_PROCESS, getpid(), -10-i);
 	
+	cpuSched(i);
+
 	/*GPU part*/
 	//printf("child process %d lock\n", getpid());
 	gpuLock(i);
 
 
 	/*gpu execution*/
-	sleep(G[i][0]); //e
+	sleep(E[i][ progress[i] ]);
 
  	gpuUnlock(i);
 
 	
 	//FIXME /*CPU resume*/
-	 progress[i]=2;
+	progress[i]=2;
+	cpuSched(i);
 
 	/*CPU part*/
-	sleep(C[i][1]);
+	sleep(E[i][ progress[i] ]);
 	//FIXME /*CPU completion*/
-	 progress[i]==4;
+	progress[i]==3;
+        setpriority(PRIO_PROCESS, getpid(), -10-i);
 
 	/*GPU part*/
 	//printf("child process %d lock\n", getpid());
 	gpuLock(i);
 
 	/*gpu execution*/
-	sleep(G[i][1]); //e
+	sleep(E[i][ progress[i] ]);
 
 	gpuUnlock(i);
 
@@ -389,10 +439,19 @@ int main(int argc, char* argv[])
         elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
         printf("task %d completion time %lf\n", i, elapsedTime);
 
-	//FIXME Job completion
-	 progress[i]=5;
+	//FIXME CPU resume
+	progress[i]=4;
+	cpuSched(i);
 
+	sleep(E[i][ progress[i] ]);
 	
+
+	//FIXME CPU completion
+	progress[i]=5;
+        setpriority(PRIO_PROCESS, getpid(), -10-i);
+	cpuSched(i);
+
+
 	/*wait for next release*/
 	sleep(T[i]-elapsedTime/1000 );
 
