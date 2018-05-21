@@ -219,7 +219,7 @@ void gpuLock(int i){
 		continue;
 	}
 	*onGPU = i;
-	printf("task %d executes on GPU\n", i);
+	//printf("task %d executes on GPU\n", i);
 
 	//MPCP priority celing
 	setpriority(PRIO_PROCESS, getpid(), -20);
@@ -456,7 +456,8 @@ int main(int argc, char* argv[])
 	/*CPU part*/
 	sleep(E[i][ progress[i] ]);
 	//FIXME /*CPU completion*/
-	progress[i]==3;
+
+	progress[i]=3;
         setpriority(PRIO_PROCESS, getpid(), -10-i);
 
 	/*GPU part*/
@@ -470,10 +471,6 @@ int main(int argc, char* argv[])
 
 
 
-	clock_gettime(CLOCK_MONOTONIC, &ts_end);
-	elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
-        elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
-        printf("task %d completion time %lf\n", i, elapsedTime);
 
 	//FIXME CPU resume
 	progress[i]=4;
@@ -487,6 +484,10 @@ int main(int argc, char* argv[])
         setpriority(PRIO_PROCESS, getpid(), -10-i);
 	cpuSched(i);
 
+	clock_gettime(CLOCK_MONOTONIC, &ts_end);
+	elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
+        elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
+        printf("task %d completion time %lf\n", i, elapsedTime);
 
 	/*wait for next release*/
 	sleep(T[i]-elapsedTime/1000 );
@@ -523,9 +524,9 @@ int main(int argc, char* argv[])
 
 	while (1)
 	{
-	//    for (int i=0; i<N; i++)
-	//	printf("%d\t", queue[i]);
-	//    printf("\n");
+	    for (int i=0; i<N; i++)
+		printf("%d\t", progress[i]);
+	    printf("\n");
 	    sleep(1);
 
 	    
