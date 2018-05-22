@@ -313,12 +313,12 @@ int main(int argc, char* argv[])
     }
 
     /* set mutex shared between processes */
-    /*pthread_mutexattr_t mattr;
-    pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
-    ret = pthread_mutex_init(gpu_lock, &mattr);
-    printf("mutex init error: %d\n", ret);
-    pthread_mutex_init(q_lock, &mattr);
-    pthread_mutexattr_destroy(&mattr);*/
+    //pthread_mutexattr_t mattr;
+    //pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+    //ret = pthread_mutex_init(gpu_lock, &mattr);
+   // printf("mutex init error: %d\n", ret);
+    //pthread_mutex_init(q_lock, &mattr);
+    //pthread_mutexattr_destroy(&mattr);
 
     //initialize
      for (i = 0; i < N; i++){
@@ -345,8 +345,8 @@ int main(int argc, char* argv[])
 
 
     onGPU = (int*) mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    x = (int*) mmap(NULL, N*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     *onGPU = N;
+    x = (int*) mmap(NULL, N*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
 
 	for (i = 0; i < N; i++) {
@@ -368,11 +368,21 @@ int main(int argc, char* argv[])
         sched_setaffinity(getpid(), sizeof(cpus), &cpus);
 	//CPU_SET(i, &cpus);
 
+	/*application invocation*/
+	switch(i)
+	{
+	case 0 : feature_tracker(argc, argv, i);
+//		 break;
+/*	case 1 : feature_tracker(argc, argv, i);
+		 break;
+	case 2 : hough_transform(argc, argv, i);
+		 break;
+	case 3 : motion_estimation(argc, argv, i);
+		 break;*/
+	default: ;
+	}
 
 
-	/*application invocation
-	if (i==0)
-		 hough_transform(argc, argv, i);*/
 		
 
 	struct timespec ts_start, ts_end;
@@ -466,26 +476,7 @@ int main(int argc, char* argv[])
 
 
 
-/*	switch(i)
-	{
-	case 0 : CPU_SET(3, &cpus);
-		 sched_setaffinity(getpid(), sizeof(cpus), &cpus);
-		 hough_transform(argc, argv);
-		 break;
-	case 1 : CPU_SET(3, &cpus);
-		 sched_setaffinity(getpid(), sizeof(cpus), &cpus);
-		 feature_tracker(argc, argv);
-		 break;
-	case 2 : CPU_SET(1, &cpus);
-		 sched_setaffinity(getpid(), sizeof(cpus), &cpus);
-		 motion_estimation(argc, argv);
-		 break;
-	case 3 : CPU_SET(1, &cpus);
-		 sched_setaffinity(getpid(), sizeof(cpus), &cpus);
-		 video_stabilizer(argc, argv);
-		 break;
-	default: ;
-	}*/
+
 
 	}
 	/*parent*/

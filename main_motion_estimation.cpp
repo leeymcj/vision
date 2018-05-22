@@ -44,6 +44,22 @@
 
 #include "iterative_motion_estimator.hpp"
 
+#include <sys/resource.h>
+#include <unistd.h>
+
+#define sched
+
+extern int *progress;
+extern int *T;
+extern void gpuLock(int i);
+extern void gpuUnlock(int i);
+extern void cpuSched(int i);
+extern void cpuResume(int i);
+extern void jobRelease(int i);
+
+
+
+
 //
 // Process events
 //
@@ -97,7 +113,7 @@ static bool read(const std::string& configFile,
 // main - Application entry point
 //
 
-int motion_estimation(int argc, char** argv)
+int motion_estimation(int argc, char** argv, int i)
 {
     try
     {
@@ -221,8 +237,21 @@ int motion_estimation(int argc, char** argv)
         nvx::Timer totalTimer;
         totalTimer.tic();
         double proc_ms = 0;
+
+	 struct timespec ts_start, ts_end;
+        double elapsedTime;
+
         while (!eventData.stop)
         {
+	//FIXME /*release*/
+         progress[i]=0;
+         //printf("task %d is on GPU\n", *onGPU);
+        #ifdef sched
+        cpuSched(i);
+        #endif
+
+        clock_gettime(CLOCK_MONOTONIC, &ts_start);//releas
+
             if (!eventData.pause)
             {
                 //
@@ -257,6 +286,17 @@ int motion_estimation(int argc, char** argv)
                     continue;
                 }
 
+		      //FIXME /*CPU completion*
+        cpuResume(i);
+
+#ifdef sched
+        cpuSched(i);
+#endif
+
+        gpuLock(i);
+
+		
+
                 //
                 // Process
                 //
@@ -267,6 +307,18 @@ int motion_estimation(int argc, char** argv)
                 ime.process();
 
                 proc_ms = procTimer.toc();
+
+     gpuUnlock(i);
+
+        //FIXME /*CPU resume*/
+        progress[i]=2;
+#ifdef sched
+        cpuSched(i);
+#endif
+
+
+
+
             }
 
             double total_ms = totalTimer.toc();
@@ -287,6 +339,16 @@ int motion_estimation(int argc, char** argv)
             {
                 ime.printPerfs();
             }
+
+
+cpuResume(i);
+#ifdef sched
+cpuSched(i);
+#endif
+
+/*GPU part*/
+//printf("child process %d lock\n", getpid());
+gpuLock(i);
 
             //
             // Render
@@ -326,6 +388,28 @@ int motion_estimation(int argc, char** argv)
             {
                 vxAgeDelay(frame_delay);
             }
+
+gpuUnlock(i);
+ //FIXME CPU resume
+        progress[i]=4;
+
+#ifdef sched
+        cpuSched(i);
+#endif
+
+
+//FIXME CPU completion
+cpuResume(i);
+#ifdef sched
+cpuSched(i);
+#endif
+clock_gettime(CLOCK_MONOTONIC, &ts_end);
+elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
+elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
+printf("task %d completion time %lf\n", i, elapsedTime);
+
+
+sleep(T[i]-elapsedTime/1000 );
         }
 
         //

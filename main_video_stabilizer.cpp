@@ -43,6 +43,21 @@
 
 #include "stabilizer.hpp"
 
+
+
+#include <sys/resource.h>
+#include <unistd.h>
+
+#define sched
+
+extern int *progress;
+extern int *T;
+extern void gpuLock(int i);
+extern void gpuUnlock(int i);
+extern void cpuSched(int i);
+extern void cpuResume(int i);
+extern void jobRelease(int i);
+
 struct EventData
 {
     EventData(): shouldStop(false), pause(false) {}
@@ -110,7 +125,7 @@ static void displayState(nvxio::Render *renderer,
 // main - Application entry point
 //
 
-int video_stabilizer(int argc, char* argv[])
+int video_stabilizer(int argc, char* argv[], int i)
 {
     try
     {
@@ -247,32 +262,37 @@ int video_stabilizer(int argc, char* argv[])
         totalTimer.tic();
         double proc_ms = 0;
 
+
+struct timespec ts_start, ts_end;
+double elapsedTime;
+
         while (!eventData.shouldStop)
         {
+
+jobRelease(i);
+
+//FIXME /*release*/
+progress[i]=0;
+         //printf("task %d is on GPU\n", *onGPU);
+#ifdef sched
+cpuSched(i);
+#endif
+
+clock_gettime(CLOCK_MONOTONIC, &ts_start);//release
+
             if (!eventData.pause)
             {
-                //
-                // Process
-                //
 
-                nvx::Timer procTimer;
-                procTimer.tic();
-                stabilizer->process(frame);
-                proc_ms = procTimer.toc();
+//FIXME /*CPU completion*
+cpuResume(i);
 
-                NVXIO_SAFE_CALL( vxAgeDelay(orig_frame_delay) );
+#ifdef sched
+cpuSched(i);
+#endif
 
-                vx_image stabImg = stabilizer->getStabilizedFrame();
-                NVXIO_SAFE_CALL( nvxuCopyImage(context, stabImg, rightRoi) );
-                NVXIO_SAFE_CALL( nvxuCopyImage(context, lastFrame, leftRoi) );
+gpuLock(i);
 
-                //
-                // Print performance results
-                //
-
-                stabilizer->printPerfs();
-
-                //
+		 //
                 // Read frame
                 //
 
@@ -288,7 +308,57 @@ int video_stabilizer(int argc, char* argv[])
                         break;
                     }
                 }
-            }
+
+//FIXME /*CPU completion*
+cpuResume(i);
+
+#ifdef sched
+cpuSched(i);
+#endif
+
+gpuLock(i);
+
+                //
+                // Process
+                //
+
+                nvx::Timer procTimer;
+                procTimer.tic();
+                stabilizer->process(frame);
+                proc_ms = procTimer.toc();
+
+                NVXIO_SAFE_CALL( vxAgeDelay(orig_frame_delay) );
+
+                vx_image stabImg = stabilizer->getStabilizedFrame();
+                NVXIO_SAFE_CALL( nvxuCopyImage(context, stabImg, rightRoi) );
+                NVXIO_SAFE_CALL( nvxuCopyImage(context, lastFrame, leftRoi) );
+
+gpuUnlock(i);
+
+//FIXME /*CPU resume*/
+progress[i]=2;
+#ifdef sched
+cpuSched(i);
+#endif
+
+                //
+                // Print performance results
+                //
+
+                stabilizer->printPerfs();
+
+
+cpuResume(i);
+#ifdef sched
+cpuSched(i);
+#endif
+/*GPU part*/
+//printf("child process %d lock\n", getpid());
+gpuLock(i);               
+      
+
+
+      }
 
             renderer->putImage(demoImg);
 
@@ -307,6 +377,38 @@ int video_stabilizer(int argc, char* argv[])
             {
                 eventData.shouldStop = true;
             }
+
+
+
+
+gpuUnlock(i);
+
+ //FIXME CPU resume
+progress[i]=4;
+
+#ifdef sched
+cpuSched(i);
+#endif
+
+
+//FIXME CPU completion
+cpuResume(i);
+#ifdef sched
+cpuSched(i);
+#endif
+clock_gettime(CLOCK_MONOTONIC, &ts_end);
+elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
+elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
+printf("task %d completion time %lf\n", i, elapsedTime);
+
+
+
+
+sleep(T[i]-elapsedTime/1000 );
+
+
+
+
         }
 
         //

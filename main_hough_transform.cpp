@@ -43,12 +43,17 @@
 #include <NVXIO/SyncTimer.hpp>
 #include <NVXIO/Utility.hpp>
 
+
+
+
+
 #include <sys/resource.h>
 #include <unistd.h>
 
 #define sched
 
-extern int * progress;
+extern int *progress;
+extern int *T;
 extern void gpuLock(int i);
 extern void gpuUnlock(int i);
 extern void cpuSched(int i);
@@ -56,7 +61,7 @@ extern void cpuResume(int i);
 extern void jobRelease(int i);
 
 
-int hough_transform(int argc, char** argv);
+//int hough_transform(int argc, char** argv);
 
 namespace {
 
@@ -341,10 +346,10 @@ int hough_transform(int argc, char** argv, int i)
         // The application recieves the keyboard events via the
         // keyboardEventCallback() function registered via the renderer object
         //
-
+	
         EventData eventData;
         render->setOnKeyboardEventCallback(keyboardEventCallback, &eventData);
-
+	
         //
         // Create OpenVX objects
         //
@@ -519,23 +524,24 @@ int hough_transform(int argc, char** argv, int i)
         nvx::Timer totalTimer;
         totalTimer.tic();
 
-	struct timespec ts_start, ts_end;
-        double elapsedTime;
+struct timespec ts_start, ts_end;
+double elapsedTime;
 
         while (!eventData.stop)
         {
 
-	jobRelease(i);
+jobRelease(i);
 
-        //FIXME /*release*/
-         progress[i]=0;
+//FIXME /*release*/
+progress[i]=0;
          //printf("task %d is on GPU\n", *onGPU);
-	#ifdef sched
-        cpuSched(i);
-	#endif
+#ifdef sched
+cpuSched(i);
+#endif
 
-	clock_gettime(CLOCK_MONOTONIC, &ts_start);//release
+clock_gettime(CLOCK_MONOTONIC, &ts_start);//release
 
+sleep(1);
             if (!eventData.pause)
             {
                 //
@@ -561,14 +567,14 @@ int hough_transform(int argc, char** argv, int i)
                     continue;
                 }
 
-	//FIXME /*CPU completion*
-	cpuResume(i);
+//FIXME /*CPU completion*
+cpuResume(i);
 	
 #ifdef sched
-        cpuSched(i);
+cpuSched(i);
 #endif
 
-	gpuLock(i);
+gpuLock(i);
 
                 //
                 // Process
@@ -580,6 +586,14 @@ int hough_transform(int argc, char** argv, int i)
                 NVXIO_SAFE_CALL( vxProcessGraph(graph) ); //FIXME how to find execution time of individual node?
 
                 proc_ms = procTimer.toc();
+
+gpuUnlock(i);
+
+//FIXME /*CPU resume*/
+progress[i]=2;
+#ifdef sched
+cpuSched(i);
+#endif
 
 
                 //
@@ -607,14 +621,6 @@ int hough_transform(int argc, char** argv, int i)
 
                     NVXIO_SAFE_CALL( vxUnmapArrayRange(circles, map_id) );
                 }
-
-	 gpuUnlock(i);
-
-	//FIXME /*CPU resume*/
-        progress[i]=2;
-#ifdef sched
-        cpuSched(i);
-#endif
 
                 //
                 // Scale detected lines (convert it to array with start and end coordinates)
@@ -706,11 +712,14 @@ int hough_transform(int argc, char** argv, int i)
 
 
 
-	cpuResume(i);
 
-        /*GPU part*/
-        //printf("child process %d lock\n", getpid());
-        gpuLock(i);
+cpuResume(i);
+#ifdef sched
+cpuSched(i);
+#endif
+/*GPU part*/
+//printf("child process %d lock\n", getpid());
+gpuLock(i);
 
 
             //
@@ -784,30 +793,32 @@ int hough_transform(int argc, char** argv, int i)
             }
 
 
-	   gpuUnlock(i);
+
+gpuUnlock(i);
 
  //FIXME CPU resume
-        progress[i]=4;
+progress[i]=4;
 
 #ifdef sched
-        cpuSched(i);
+cpuSched(i);
 #endif
 
 
-        //FIXME CPU completion
-	cpuResume(i);
+//FIXME CPU completion
+cpuResume(i);
 #ifdef sched
-        cpuSched(i);
+cpuSched(i);
 #endif
-        clock_gettime(CLOCK_MONOTONIC, &ts_end);
-        elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
-        elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
-        printf("task %d completion time %lf\n", i, elapsedTime);
+clock_gettime(CLOCK_MONOTONIC, &ts_end);
+elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
+elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
+printf("task %d completion time %lf\n", i, elapsedTime);
 
 
 
 
-	//sleep(T[i]-elapsedTime/1000 );
+sleep(T[i]-elapsedTime/1000 );
+
 }
 
         //

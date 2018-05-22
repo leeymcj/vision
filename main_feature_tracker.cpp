@@ -43,6 +43,21 @@
 #include <NVXIO/SyncTimer.hpp>
 #include <NVXIO/Utility.hpp>
 
+
+
+
+#include <sys/resource.h>
+#include <unistd.h>
+
+#define sched
+
+extern int *progress;
+extern int *T;
+extern void gpuLock(int i);
+extern void gpuUnlock(int i);
+extern void cpuSched(int i);
+extern void cpuResume(int i);
+extern void jobRelease(int i);
 //
 // Process events
 //
@@ -137,7 +152,7 @@ static bool read(const std::string & nf, nvx::FeatureTracker::Params &config, st
 // type Application(defined in NVXIO library).
 //
 
-int feature_tracker(int argc, char* argv[])
+int feature_tracker(int argc, char* argv[], int i)
 {
     try
     {
@@ -311,8 +326,29 @@ int feature_tracker(int argc, char* argv[])
         nvx::Timer totalTimer;
         totalTimer.tic();
         double proc_ms = 0;
-        while (!eventData.shouldStop)
+
+struct timespec ts_start, ts_end;
+double elapsedTime;
+
+
+//        while (!eventData.shouldStop)
+        while (1)
         {
+
+clock_gettime(CLOCK_MONOTONIC, &ts_start);//release
+
+jobRelease(i);
+
+//FIXME release
+progress[i]=0;
+//printf("task %d is on GPU\n", *onGPU);
+#ifdef sched
+cpuSched(i);
+#endif
+
+
+
+
             if (!eventData.pause)
             {
                 frameStatus = source->fetch(frame);
@@ -328,6 +364,22 @@ int feature_tracker(int argc, char* argv[])
                     continue;
                 }
 
+
+
+//FIXME CPU completion
+cpuResume(i);
+
+
+
+#ifdef sched
+cpuSched(i);
+#endif
+
+
+gpuLock(i);
+
+
+
                 //
                 // Process
                 //
@@ -339,12 +391,32 @@ int feature_tracker(int argc, char* argv[])
 
                 proc_ms = procTimer.toc();
 
+
+
+gpuUnlock(i);
+
+
+
+//FIXME CPU resume
+progress[i]=2;
+#ifdef sched
+cpuSched(i);
+#endif
+
                 //
                 // Print performance results
                 //
 
                 tracker->printPerfs();
             }
+
+cpuResume(i);
+#ifdef sched
+cpuSched(i);
+#endif
+//GPU part
+//printf("child process %d lock\n", getpid());
+gpuLock(i);
 
             //
             // Show the previous frame
@@ -390,7 +462,36 @@ int feature_tracker(int argc, char* argv[])
             {
                 vxAgeDelay(frame_delay);
             }
-        }
+
+gpuUnlock(i);
+
+ //FIXME CPU resume
+progress[i]=4;
+
+#ifdef sched
+cpuSched(i);
+#endif
+
+
+//FIXME CPU completion
+cpuResume(i);
+#ifdef sched
+cpuSched(i);
+#endif
+
+clock_gettime(CLOCK_MONOTONIC, &ts_end);
+elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms
+elapsedTime += (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;   // us to ms
+printf("task %d completion time %lf\n", i, elapsedTime);
+
+//sleep(T[i]-elapsedTime/1000 );
+usleep( (100-elapsedTime)*1000 );
+
+
+
+
+
+}
 
         //
         // Release all objects
