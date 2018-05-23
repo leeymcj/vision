@@ -44,6 +44,15 @@
 
 #include "iterative_motion_estimator.hpp"
 
+
+#include <sys/resource.h>
+#include <unistd.h>
+
+extern int *progress;
+
+extern void gpuLock(int i);
+extern void gpuUnlock(int i);
+
 //
 // Process events
 //
@@ -97,7 +106,7 @@ static bool read(const std::string& configFile,
 // main - Application entry point
 //
 
-int motion_estimation(int argc, char** argv)
+int motion_estimation(int argc, char** argv, int i)
 {
     try
     {
@@ -211,6 +220,16 @@ int motion_estimation(int argc, char** argv)
 
         ime.init(prevFrame, currFrame, params);
 
+
+
+//FIXME /*CPU completion*/
+progress[i]=1;
+setpriority(PRIO_PROCESS, getpid(), -10-i);
+#ifdef sched
+cpuSched(i);
+#endif
+
+gpuLock(i);
         //
         // Main loop
         //
@@ -269,6 +288,12 @@ int motion_estimation(int argc, char** argv)
                 proc_ms = procTimer.toc();
             }
 
+gpuUnlock(i);
+//FIXME /*CPU resume*/
+        progress[i]=2;
+#ifdef sched
+        cpuSched(i);
+#endif
             double total_ms = totalTimer.toc();
 
             std::cout << "Display Time : " << total_ms << " ms" << std::endl << std::endl;
@@ -288,6 +313,14 @@ int motion_estimation(int argc, char** argv)
                 ime.printPerfs();
             }
 
+
+//FIXME /*CPU completion*/
+progress[i]=3;
+setpriority(PRIO_PROCESS, getpid(), -10-i);
+
+/*GPU part*/
+//printf("child process %d lock\n", getpid());
+gpuLock(i);
             //
             // Render
             //
@@ -326,6 +359,15 @@ int motion_estimation(int argc, char** argv)
             {
                 vxAgeDelay(frame_delay);
             }
+
+gpuUnlock(i);
+
+
+//FIXME CPU resume
+progress[i]=4;
+#ifdef sched
+cpuSched(i);
+#endif
 
 break;
         }

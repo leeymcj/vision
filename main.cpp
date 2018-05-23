@@ -99,10 +99,10 @@ int PPriority[CPU][N] = {
 #include <NVXIO/SyncTimer.hpp>
 #include <NVXIO/Utility.hpp>*/
 
-int hough_transform(int argc, char* argv[]);
-int feature_tracker(int argc, char* argv[]);
-int motion_estimation(int argc, char* argv[]);
-int video_stabilizer(int argc, char* argv[]);
+int hough_transform(int argc, char* argv[], int i);
+int feature_tracker(int argc, char* argv[], int i);
+int motion_estimation(int argc, char* argv[], int i);
+int video_stabilizer(int argc, char* argv[], int i);
 
 //
 // main - Application entry point
@@ -429,89 +429,18 @@ int main(int argc, char* argv[])
 
 	clock_gettime(CLOCK_MONOTONIC, &ts_start);//release
 
-	/*CPU part*/
-	//sleep(E[i][ progress[i] ]);
-
-	//FIXME /*CPU completion*/
-	progress[i]=1;
-        setpriority(PRIO_PROCESS, getpid(), -10-i);
-	
-#ifdef sched
-	cpuSched(i);
-#endif
-
-	/*GPU part*/
-	//printf("child process %d lock\n", getpid());
-	gpuLock(i);
-
-
-	/*gpu execution*/
-
 	switch(i)
 	{
-	case 0 : hough_transform(argc, argv);
+	case 0 : hough_transform(argc, argv, i);
 		 break;
-	case 1 : feature_tracker(argc, argv);
+	case 1 : feature_tracker(argc, argv, i);
 		 break;
-	case 2 : motion_estimation(argc, argv);
+	case 2 : motion_estimation(argc, argv, i);
 		 break;
-	case 3 : video_stabilizer(argc, argv);
+	case 3 : video_stabilizer(argc, argv, i);
 		 break;
 	default: ;
 	}
-
- 	gpuUnlock(i);
-
-	
-	//FIXME /*CPU resume*/
-	progress[i]=2;
-#ifdef sched
-	cpuSched(i);
-#endif
-
-	/*CPU part*/
-	//sleep(E[i][ progress[i] ]);
-	//FIXME /*CPU completion*/
-
-	progress[i]=3;
-        setpriority(PRIO_PROCESS, getpid(), -10-i);
-
-	/*GPU part*/
-	//printf("child process %d lock\n", getpid());
-	gpuLock(i);
-
-	/*gpu execution*/
-	switch(i)
-	{
-	case 0 : video_stabilizer(argc, argv);
-		 break;
-	case 1 : motion_estimation(argc, argv);
-		 break;
-	case 2 : hough_transform(argc, argv);
-		 break;
-	case 3 : feature_tracker(argc, argv);
-		 break;
-	default: ;
-	}
-
-	gpuUnlock(i);
-
-
-
-
-	//FIXME CPU resume
-	progress[i]=4;
-#ifdef sched
-	cpuSched(i);
-#endif
-
-	sleep(E[i][ progress[i] ]);
-	
-
-	//FIXME CPU completion
-	progress[i]=5;
-        setpriority(PRIO_PROCESS, getpid(), -10-i);
-	cpuSched(i);
 
 	clock_gettime(CLOCK_MONOTONIC, &ts_end);
 	elapsedTime = (ts_end.tv_sec - ts_start.tv_sec) * 1000.0;      // sec to ms

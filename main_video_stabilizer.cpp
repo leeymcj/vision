@@ -43,6 +43,15 @@
 
 #include "stabilizer.hpp"
 
+#include <sys/resource.h>
+#include <unistd.h>
+
+extern int *progress;
+
+extern void gpuLock(int i);
+extern void gpuUnlock(int i);
+
+
 struct EventData
 {
     EventData(): shouldStop(false), pause(false) {}
@@ -110,7 +119,7 @@ static void displayState(nvxio::Render *renderer,
 // main - Application entry point
 //
 
-int video_stabilizer(int argc, char* argv[])
+int video_stabilizer(int argc, char* argv[], int i)
 {
     try
     {
@@ -247,6 +256,15 @@ int video_stabilizer(int argc, char* argv[])
         totalTimer.tic();
         double proc_ms = 0;
 
+//FIXME /*CPU completion*/
+progress[i]=1;
+setpriority(PRIO_PROCESS, getpid(), -10-i);
+#ifdef sched
+cpuSched(i);
+#endif
+
+gpuLock(i);
+
         while (!eventData.shouldStop)
         {
             if (!eventData.pause)
@@ -266,6 +284,12 @@ int video_stabilizer(int argc, char* argv[])
                 NVXIO_SAFE_CALL( nvxuCopyImage(context, stabImg, rightRoi) );
                 NVXIO_SAFE_CALL( nvxuCopyImage(context, lastFrame, leftRoi) );
 
+gpuUnlock(i);
+//FIXME /*CPU resume*/
+        progress[i]=2;
+#ifdef sched
+        cpuSched(i);
+#endif
                 //
                 // Print performance results
                 //
@@ -290,6 +314,16 @@ int video_stabilizer(int argc, char* argv[])
                 }
             }
 
+
+//FIXME /*CPU completion*/
+progress[i]=3;
+setpriority(PRIO_PROCESS, getpid(), -10-i);
+
+/*GPU part*/
+//printf("child process %d lock\n", getpid());
+gpuLock(i);
+
+
             renderer->putImage(demoImg);
 
             double total_ms = totalTimer.toc();
@@ -307,6 +341,15 @@ int video_stabilizer(int argc, char* argv[])
             {
                 eventData.shouldStop = true;
             }
+
+gpuUnlock(i);
+
+
+//FIXME CPU resume
+progress[i]=4;
+#ifdef sched
+cpuSched(i);
+#endif
 
 break;
         }

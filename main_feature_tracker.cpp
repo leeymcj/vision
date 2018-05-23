@@ -43,6 +43,16 @@
 #include <NVXIO/SyncTimer.hpp>
 #include <NVXIO/Utility.hpp>
 
+#include <sys/resource.h>
+#include <unistd.h>
+
+extern int *progress;
+
+extern void gpuLock(int i);
+extern void gpuUnlock(int i);
+
+
+
 //
 // Process events
 //
@@ -137,7 +147,7 @@ static bool read(const std::string & nf, nvx::FeatureTracker::Params &config, st
 // type Application(defined in NVXIO library).
 //
 
-int feature_tracker(int argc, char* argv[])
+int feature_tracker(int argc, char* argv[], int i)
 {
     try
     {
@@ -311,6 +321,16 @@ int feature_tracker(int argc, char* argv[])
         nvx::Timer totalTimer;
         totalTimer.tic();
         double proc_ms = 0;
+
+//FIXME /*CPU completion*/
+progress[i]=1;
+setpriority(PRIO_PROCESS, getpid(), -10-i);
+#ifdef sched
+cpuSched(i);
+#endif
+
+gpuLock(i);
+
         while (!eventData.shouldStop)
         {
             if (!eventData.pause)
@@ -339,12 +359,29 @@ int feature_tracker(int argc, char* argv[])
 
                 proc_ms = procTimer.toc();
 
+gpuUnlock(i);
+//FIXME /*CPU resume*/
+        progress[i]=2;
+#ifdef sched
+        cpuSched(i);
+#endif
+
+
                 //
                 // Print performance results
                 //
 
                 tracker->printPerfs();
             }
+
+
+//FIXME /*CPU completion*/
+progress[i]=3;
+setpriority(PRIO_PROCESS, getpid(), -10-i);
+
+/*GPU part*/
+//printf("child process %d lock\n", getpid());
+gpuLock(i);
 
             //
             // Show the previous frame
@@ -390,6 +427,15 @@ int feature_tracker(int argc, char* argv[])
             {
                 vxAgeDelay(frame_delay);
             }
+
+gpuUnlock(i);
+
+
+//FIXME CPU resume
+progress[i]=4;
+#ifdef sched
+cpuSched(i);
+#endif
 
 break;
 

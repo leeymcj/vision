@@ -43,6 +43,13 @@
 #include <NVXIO/SyncTimer.hpp>
 #include <NVXIO/Utility.hpp>
 
+#include <sys/resource.h>
+#include <unistd.h>
+
+extern int *progress;
+
+extern void gpuLock(int i);
+extern void gpuUnlock(int i);
 
 namespace {
 
@@ -238,7 +245,7 @@ void keyboardEventCallback(void* eventData, vx_char key, vx_uint32 /*x*/, vx_uin
 // parameters are read into the configFile
 //
 
-int hough_transform(int argc, char** argv)
+int hough_transform(int argc, char** argv, int i)
 {
     try
     {
@@ -492,6 +499,8 @@ int hough_transform(int argc, char** argv)
             return nvxio::Application::APP_EXIT_CODE_INVALID_GRAPH;
         }
 
+
+
         //
         // Main loop
         //
@@ -505,6 +514,16 @@ int hough_transform(int argc, char** argv)
         nvx::Timer totalTimer;
         totalTimer.tic();
 
+//FIXME /*CPU completion*/
+progress[i]=1;
+setpriority(PRIO_PROCESS, getpid(), -10-i);
+#ifdef sched
+cpuSched(i);
+#endif
+
+gpuLock(i);
+
+
         while (!eventData.stop)
         {
             if (!eventData.pause)
@@ -515,6 +534,8 @@ int hough_transform(int argc, char** argv)
                 // whether to display orignal (unprocessed) source image or edges
                 // overlayed with detected lines and circles based on user input
                 //
+
+
 
                 nvxio::FrameSource::FrameStatus frameStatus = frameSource->fetch(frame);
 
@@ -542,6 +563,15 @@ int hough_transform(int argc, char** argv)
                 NVXIO_SAFE_CALL( vxProcessGraph(graph) );
 
                 proc_ms = procTimer.toc();
+
+
+gpuUnlock(i);
+//FIXME /*CPU resume*/
+        progress[i]=2;
+#ifdef sched
+        cpuSched(i);
+#endif
+
 
 
                 //
@@ -657,6 +687,13 @@ int hough_transform(int argc, char** argv)
             total_ms = totalTimer.toc();
 
             totalTimer.tic();
+//FIXME /*CPU completion*/
+progress[i]=3;
+setpriority(PRIO_PROCESS, getpid(), -10-i);
+
+/*GPU part*/
+//printf("child process %d lock\n", getpid());
+gpuLock(i);
 
             //
             // Show original image or detected edges
@@ -727,6 +764,17 @@ int hough_transform(int argc, char** argv)
             {
                 eventData.stop = true;
             }
+
+
+
+gpuUnlock(i);
+
+
+//FIXME CPU resume
+progress[i]=4;
+#ifdef sched
+cpuSched(i);
+#endif
 
 break;
         }
