@@ -79,13 +79,13 @@ int V[N] = { 80, 37, 20, 20};
 int x[N];
 int *progress;
 int *onGPU;
-int HOT[N+1] = {0, 0, 1, 1, 0};
+int HOT[N+1] = {1, 1, 0, 0, 0};
 int P[N] = { 1, 1, 3, 3};
 int PPriority[CPU][N] = {
 			{-1, -1, -1, -1}, //in the ordre of priority
-			{3, 0, -1, -1},
+			{1, 0, -1, -1},
 			{-1, -1, -1, -1},
-			{2, 1, -1, -1}
+			{3, 2, -1, -1}
 			};
 
 
@@ -483,13 +483,13 @@ int main(int argc, char* argv[])
 	/*gpu execution*/
 	switch(i)
 	{
-	case 0 : hough_transform(argc, argv);
+	case 0 : video_stabilizer(argc, argv);
 		 break;
-	case 1 : feature_tracker(argc, argv);
+	case 1 : motion_estimation(argc, argv);
 		 break;
-	case 2 : motion_estimation(argc, argv);
+	case 2 : hough_transform(argc, argv);
 		 break;
-	case 3 : video_stabilizer(argc, argv);
+	case 3 : feature_tracker(argc, argv);
 		 break;
 	default: ;
 	}
@@ -501,7 +501,7 @@ int main(int argc, char* argv[])
 
 	//FIXME CPU resume
 	progress[i]=4;
-#ifdef
+#ifdef sched
 	cpuSched(i);
 #endif
 
