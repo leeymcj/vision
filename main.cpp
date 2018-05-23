@@ -59,7 +59,7 @@
 
 #define U 0.3
 
-#define sched
+//#define sched
 
 int *queue;
 
@@ -75,21 +75,19 @@ int E[N][K*2+1] = {0};
 int T[N] = {0};
 
 	
-#ifdef sched
 int V[N] = { 80, 37, 20, 20};
 int x[N];
 int *progress;
 int *onGPU;
 int HOT[N+1] = {0, 0, 1, 1, 0};
-int P[N] = { 0, 0, 0, 0};
+int P[N] = { 1, 1, 3, 3};
 int PPriority[CPU][N] = {
-			{3, 2, 1, 0}, //in the ordre of priority
+			{-1, -1, -1, -1}, //in the ordre of priority
+			{3, 0, -1, -1},
 			{-1, -1, -1, -1},
-			{-1, -1, -1, -1},
-			{-1, -1, -1, -1}
+			{2, 1, -1, -1}
 			};
 
-#endif
 
 
 /*#include <NVX/nvx.h>
@@ -209,7 +207,7 @@ int dequeue(int* q)
 void gpuLock(int i){
 
 	while( pthread_mutex_trylock(gpu_lock) ){
-		printf("task%d put into wait\n", i);
+		//printf("task%d put into wait\n", i);
 
 		pthread_mutex_lock(q_lock);
 		enqueue(queue, getpid());
@@ -363,12 +361,12 @@ int main(int argc, char* argv[])
 
 
     /* set mutex shared between processes */
-    pthread_mutexattr_t mattr;
+/*    pthread_mutexattr_t mattr;
     pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
     pthread_mutex_init(gpu_lock, &mattr);
 
     pthread_mutex_init(q_lock, &mattr);
-    pthread_mutexattr_destroy(&mattr);
+    pthread_mutexattr_destroy(&mattr);*/
 
 	struct timespec ts_start, ts_end;
     	double elapsedTime;
@@ -420,9 +418,11 @@ int main(int argc, char* argv[])
 #endif
 
 	//FIXME /*release*/
-	 progress[i]=0;
-	 //printf("task %d is on GPU\n", *onGPU);
+	progress[i]=0;
+	//printf("task %d is on GPU\n", *onGPU);
+#ifdef sched
 	cpuSched(i);
+#endif
 	 
 
 
@@ -430,13 +430,15 @@ int main(int argc, char* argv[])
 	clock_gettime(CLOCK_MONOTONIC, &ts_start);//release
 
 	/*CPU part*/
-	sleep(E[i][ progress[i] ]);
+	//sleep(E[i][ progress[i] ]);
 
 	//FIXME /*CPU completion*/
 	progress[i]=1;
         setpriority(PRIO_PROCESS, getpid(), -10-i);
 	
+#ifdef sched
 	cpuSched(i);
+#endif
 
 	/*GPU part*/
 	//printf("child process %d lock\n", getpid());
@@ -444,17 +446,31 @@ int main(int argc, char* argv[])
 
 
 	/*gpu execution*/
-	sleep(E[i][ progress[i] ]);
+
+	switch(i)
+	{
+	case 0 : hough_transform(argc, argv);
+		 break;
+	case 1 : feature_tracker(argc, argv);
+		 break;
+	case 2 : motion_estimation(argc, argv);
+		 break;
+	case 3 : video_stabilizer(argc, argv);
+		 break;
+	default: ;
+	}
 
  	gpuUnlock(i);
 
 	
 	//FIXME /*CPU resume*/
 	progress[i]=2;
+#ifdef sched
 	cpuSched(i);
+#endif
 
 	/*CPU part*/
-	sleep(E[i][ progress[i] ]);
+	//sleep(E[i][ progress[i] ]);
 	//FIXME /*CPU completion*/
 
 	progress[i]=3;
@@ -465,7 +481,18 @@ int main(int argc, char* argv[])
 	gpuLock(i);
 
 	/*gpu execution*/
-	sleep(E[i][ progress[i] ]);
+	switch(i)
+	{
+	case 0 : hough_transform(argc, argv);
+		 break;
+	case 1 : feature_tracker(argc, argv);
+		 break;
+	case 2 : motion_estimation(argc, argv);
+		 break;
+	case 3 : video_stabilizer(argc, argv);
+		 break;
+	default: ;
+	}
 
 	gpuUnlock(i);
 
@@ -474,7 +501,9 @@ int main(int argc, char* argv[])
 
 	//FIXME CPU resume
 	progress[i]=4;
+#ifdef
 	cpuSched(i);
+#endif
 
 	sleep(E[i][ progress[i] ]);
 	
@@ -490,7 +519,7 @@ int main(int argc, char* argv[])
         printf("task %d completion time %lf\n", i, elapsedTime);
 
 	/*wait for next release*/
-	sleep(T[i]-elapsedTime/1000 );
+	//sleep(T[i]-elapsedTime/1000 );
 
 
 }	
